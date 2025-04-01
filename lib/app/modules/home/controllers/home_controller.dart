@@ -274,14 +274,6 @@ class HomeController extends GetxController {
       scalingFactor.value = (minFactor + (maxFactor - minFactor) * newFactor);
     });
 
-    if (Get.arguments != null) {
-      bool showMotivationalQuote = Get.arguments.showMotivationalQuote;
-
-      if (showMotivationalQuote) {
-        Quote quote = Utils.getRandomQuote();
-        showQuotePopup(quote);
-      }
-    }
   }
 
   refreshUpcomingAlarms() async {
@@ -490,79 +482,108 @@ class HomeController extends GetxController {
 
   // Delete alarms mentioned in the selected alarm set
   Future<void> deleteAlarms() async {
-    for (var alarm in selectedAlarmSet) {
-      var alarmId = alarm.first;
-      var isSharedAlarmEnabled = alarm.second;
+    try {
+      if (selectedAlarmSet.isEmpty) {
+        Get.snackbar(
+          'Error',
+          'No alarms selected for deletion',
+          snackPosition: SnackPosition.BOTTOM,
+          backgroundColor: Colors.red,
+          colorText: Colors.white,
+        );
+        return;
+      }
 
-      isSharedAlarmEnabled
-          ? await FirestoreDb.deleteAlarm(
-              userModel.value,
-              alarmId,
-            )
-          : await IsarDb.deleteAlarm(alarmId);
-    }
-  }
+      int successCount = 0;
+      List<AlarmModel> deletedAlarms = [];
 
-  void showQuotePopup(Quote quote) {
-    Get.defaultDialog(
-      title: 'Motivational Quote',
-      titlePadding: const EdgeInsets.only(
-        top: 20,
-        bottom: 10,
-      ),
-      backgroundColor: themeController.secondaryBackgroundColor.value,
-      titleStyle: TextStyle(
-        color: themeController.primaryTextColor.value,
-      ),
-      contentPadding: const EdgeInsets.all(20),
-      content: Column(
-        children: [
-          Obx(
-            () => Text(
-              quote.getQuote(),
-              style: TextStyle(
-                color: themeController.primaryTextColor.value,
-              ),
-            ),
+      for (var alarm in selectedAlarmSet) {
+        var alarmId = alarm.first;
+        var isSharedAlarmEnabled = alarm.second;
+
+        try {
+          if (isSharedAlarmEnabled) {
+            
+            AlarmModel? alarmToDelete = await FirestoreDb.getAlarm(userModel.value, alarmId);
+            if (alarmToDelete != null) {
+              deletedAlarms.add(alarmToDelete);
+              await FirestoreDb.deleteAlarm(userModel.value, alarmId);
+              successCount++;
+            }
+          } else {
+            
+            AlarmModel? alarmToDelete = await IsarDb.getAlarm(alarmId);
+            if (alarmToDelete != null) {
+              deletedAlarms.add(alarmToDelete);
+              await IsarDb.deleteAlarm(alarmId);
+              successCount++;
+            }
+          }
+        } catch (e) {
+          debugPrint('Error deleting alarm: $e');
+          continue;
+        }
+      }
+
+      if (successCount > 0) {
+        if (Get.isSnackbarOpen) {
+          Get.closeAllSnackbars();
+        }
+
+        Get.snackbar(
+          'Success',
+          '$successCount ${successCount == 1 ? 'alarm' : 'alarms'} deleted',
+          duration: Duration(seconds: duration.toInt()),
+          snackPosition: SnackPosition.BOTTOM,
+          backgroundColor: Colors.green,
+          colorText: Colors.white,
+          margin: const EdgeInsets.symmetric(
+            horizontal: 10,
+            vertical: 15,
           ),
-          const SizedBox(
-            height: 15,
-          ),
-          Align(
-            alignment: Alignment.centerRight,
-            child: Obx(
-              () => Text(
-                quote.getAuthor(),
-                style: TextStyle(
-                  color: themeController.primaryTextColor.value,
-                  fontWeight: FontWeight.w600,
-                  fontStyle: FontStyle.italic,
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(
-            height: 30,
-          ),
-          TextButton(
-            style: ButtonStyle(
-              backgroundColor: MaterialStateProperty.all(
-                kprimaryColor,
-              ),
-            ),
-            onPressed: () {
-              Get.back();
+          mainButton: TextButton(
+            onPressed: () async {
+              
+              for (var alarm in deletedAlarms) {
+                if (alarm.isSharedAlarmEnabled) {
+                  await FirestoreDb.addAlarm(userModel.value, alarm);
+                } else {
+                  await IsarDb.addAlarm(alarm);
+                }
+              }
+              
+              refreshTimer = true;
+              refreshUpcomingAlarms();
             },
             child: Text(
-              'Dismiss',
-              style: TextStyle(
-                color: themeController.secondaryTextColor.value,
-              ),
+              'Undo',
+              style: TextStyle(color: Colors.white),
             ),
           ),
-        ],
-      ),
-    );
+        );
+
+        
+        selectedAlarmSet.clear();
+        numberOfAlarmsSelected.value = 0;
+      } else {
+        Get.snackbar(
+          'Error',
+          'No alarms were deleted',
+          snackPosition: SnackPosition.BOTTOM,
+          backgroundColor: Colors.red,
+          colorText: Colors.white,
+        );
+      }
+    } catch (e) {
+      debugPrint('Error in deleteAlarms: $e');
+      Get.snackbar(
+        'Error',
+        'Failed to delete alarms',
+        snackPosition: SnackPosition.BOTTOM,
+        backgroundColor: Colors.red,
+        colorText: Colors.white,
+      );
+    }
   }
 
   Future<void> swipeToDeleteAlarm(UserModel? user, AlarmModel alarm) async {
